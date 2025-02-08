@@ -1,30 +1,25 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { HomePage } from './components/home/HomePage';
 import { PredictionPage } from './components/prediction/PredictionPage';
+import { NotFound } from './components/layout/NotFound';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('home');
-
-  const handleGetStarted = () => {
-    setCurrentPage('predict');
-  };
-
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <Navbar currentPage={currentPage} onPageChange={setCurrentPage} />
-      
-      <main>
-        {currentPage === 'predict' ? (
-          <PredictionPage />
-        ) : (
-          <HomePage onGetStarted={handleGetStarted} />
-        )}
-      </main>
-
+      <Router>
+      <Navbar/>
+      <Routes>
+        <Route path="/" element={<HomePage onGetStarted={() => {}} />} />
+        <Route path="/prediction" element={<PredictionPage />} />
+        <Route path='*' element={<NotFound />}/>
+      </Routes>
       <Footer />
+    </Router>
     </div>
+    
   );
 }
 
