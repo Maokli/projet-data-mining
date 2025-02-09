@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import openai
-import os
+import json
+import re
 import numpy as np
 import joblib
 from sklearn.preprocessing import StandardScaler
@@ -11,17 +12,19 @@ app = Flask(__name__)
 
 CORS(app)
 # Set your OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(
+    api_key="key goes here",
+)
 
 
 # Model paths
 MODEL_PATHS = {
     "rating-gbr": "models/rating-gbr.pkl",
-    "revenue-rf": "models/revenue_rf.pkl"
+    "revenue-rf": "models/revenue-rf.pkl"
 }
 
 # Load Word2Vec model and scaler
-word2vec_model = Word2Vec.load("word2vec_model.model")  # Replace with your actual path
+word2vec_model = Word2Vec.load("models/word2vec_model.model")
 scaler = StandardScaler()
 
 # Genre columns
@@ -30,14 +33,6 @@ GENRE_COLUMNS = ['Action', 'Adventure', 'Animation', 'Biography', 'Comedy', 'Cri
                  'Music', 'Musical', 'Mystery', 'Romance', 'Sci-Fi', 'Science', 'Sport', 'TV',
                  'Thriller', 'War', 'Western']
 
-def transform_user_input(user_keywords, user_genres, user_budget, model, scaler, genre_columns):
-    """Transform user input into numerical features."""
-    keyword_vectors = [model.wv[word] for word in user_keywords if word in model.wv]
-    keyword_vector_avg = np.mean(keyword_vectors, axis=0) if keyword_vectors else np.zeros(model.vector_size)
-    genre_vector = np.array([1 if genre in user_genres else 0 for genre in genre_columns])
-    feature_vector = np.concatenate((keyword_vector_avg, [user_budget], genre_vector))
-    return scaler.fit_transform(feature_vector.reshape(1, -1))
-
 def load_model(model_name):
     """Load the specified model from disk."""
     if model_name in MODEL_PATHS:
@@ -45,6 +40,47 @@ def load_model(model_name):
     else:
         return None
     
+def transform_user_input(user_keywords, user_genres, user_budget, model, scaler,genre_columns, embedding_dim=30):
+    """
+    Transforms user input into a feature vector compatible with the trained model.
+
+    Parameters:
+        user_keywords (list of str): List of keywords provided by the user.
+        user_genre (str): Genre of the movie provided by the user.
+        user_budget (float): Budget of the movie provided by the user.
+        model (gensim.models.Word2Vec): Pretrained Word2Vec model.
+        scaler (sklearn.preprocessing.StandardScaler): Scaler fitted to the budget column.
+        genre_columns (list of str): List of all possible genre columns in the dataset.
+        embedding_dim (int): Dimension of the Word2Vec embeddings.
+
+    Returns:
+        np.array: A 1D array containing the transformed features for prediction.
+    """
+    # 1. Convert keywords to embedding
+    def keywords_to_embedding(keywords, model, embedding_dim):
+        vectors = [model.wv[word] for word in keywords if word in model.wv]
+        if vectors:
+            return np.mean(vectors, axis=0)
+        else:
+            return np.zeros(embedding_dim)
+
+    user_keywords_embedding = keywords_to_embedding(user_keywords, model, embedding_dim)
+
+    # 2. Normalize the budget
+    user_budget_normalized = scaler.fit_transform([[user_budget]])[0][0]
+
+    # 3. Encode the genre
+    genre_vector = np.zeros(len(genre_columns))
+    for genre in user_genres:
+        if genre in genre_columns:
+            genre_index = genre_columns.index(genre)
+            genre_vector[genre_index] = 1
+
+    # 4. Combine all features
+    user_input = np.concatenate([user_keywords_embedding, genre_vector, [user_budget_normalized]])
+
+    return user_input.reshape(1, -1)
+
 def extract_movie_criteria(description):
     # Define the prompt for OpenAI
     prompt = f"""
@@ -57,46 +93,48 @@ def extract_movie_criteria(description):
 
     Return the output in the following JSON format:
     {{
-        "budget": "budget information",
-        "keywords": ["keyword1", "keyword2", "keyword3"],
-        "genres": ["genre1", "genre2", "genre3"]
+        "budget": number,
+        "keywords": string[],
+        "genres": string[]
     }}
+    
+    The budget field should be a number and not a string.
     """
 
     # Call OpenAI API
-    response = openai.Completion.create(
-        engine="text-davinci-003",  # Use the appropriate engine
-        prompt=prompt,
-        max_tokens=150,
-        temperature=0.5,
-        stop=None
+    response = client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        model="gpt-4o",
     )
 
     # Extract the generated text
-    generated_text = response.choices[0].text.strip()
+    generated_text = response.choices[0].message.content.strip()
+    print(generated_text)
 
-    # Parse the generated text into a dictionary
+    # Regex pattern to extract JSON string
+    json_pattern = re.search(r'\{.*\}', generated_text, re.DOTALL)
+    
+    # Parse the extracted JSON or return defaults
     try:
-        import json
-        criteria = json.loads(generated_text)
+        criteria = json.loads(json_pattern.group(0)) if json_pattern else {"budget": "Unknown", "keywords": [], "genres": []}
     except json.JSONDecodeError:
-        criteria = {
-            "budget": "Unknown",
-            "keywords": [],
-            "genres": []
-        }
-
+        criteria = {"budget": "Unknown", "keywords": [], "genres": []}
+    
     return criteria
 
 @app.route('/getMovieCriteria', methods=['POST'])
 def get_movie_criteria():
     data = request.json
     test = data.get('test', False)
-    print (test)
     movie_description = data.get('description', '')
     if (test):
         return jsonify({
-    "budget": "$125 million",
+    "budget": 125000000,
     "keywords": ["magic", "adventure", "friendship"],
     "genres": ["Fantasy", "Adventure"]
 })
@@ -109,22 +147,24 @@ def get_movie_criteria():
 def predict():
     """Endpoint to make predictions using the selected model."""
     data = request.json
-    model_name = data.get("model")
     user_keywords = data.get("keywords", [])
     user_genres = data.get("genres", [])
     user_budget = data.get("budget", 0)
-
-    if not model_name or not user_keywords or not user_genres:
+    print(user_keywords)
+    print(user_genres)
+    print(user_budget)
+    if not user_keywords or not user_genres:
         return jsonify({"error": "Model name, keywords, and genres are required"}), 400
     
-    model = load_model(model_name)
-    if model is None:
-        return jsonify({"error": "Invalid model name"}), 400
+    rating_model = joblib.load(MODEL_PATHS["rating-gbr"], mmap_mode='r')
+    revenue_model = joblib.load(MODEL_PATHS["revenue-rf"], mmap_mode='r')
     
     try:
         features_array = transform_user_input(user_keywords, user_genres, user_budget, word2vec_model, scaler, GENRE_COLUMNS)
-        prediction = model.predict(features_array)
-        return jsonify({"prediction": prediction.tolist()})
+        rating_prediction = rating_model.predict(features_array)
+        revenue_prediction = revenue_model.predict(features_array)
+        revenue_prediction_unnormalized = np.expm1(revenue_prediction.tolist()[0])
+        return jsonify({"rating": rating_prediction.tolist()[0], "revenue": revenue_prediction_unnormalized})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

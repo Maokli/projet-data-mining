@@ -1,9 +1,9 @@
-import React, { useRef, useState } from 'react';
-import type { MoviePrediction, MoviePredictionCriteria } from '../../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { type MoviePrediction, type MoviePredictionCriteria, type PredictionRequest } from '../../types';
 import { MovieForm } from './MovieForm';
 import { MovieCriteria } from './MovieCriteria';
 import { PredictionResults } from './PredictionResults';
-import { GET_MOVIE_CRITERIAS } from '../../constants/api.constants';
+import { GET_MOVIE_CRITERIAS, PREDICT } from '../../constants/api.constants';
 import axios from 'axios';
 import { MovieCriteriaSkeleton } from './MovieCriteriaSkeleton';
 import { PredictionResultsSkeleton } from './PredictionResultsSkeleton';
@@ -26,39 +26,32 @@ export function PredictionPage() {
     e.preventDefault();
     setTimeout(scrollToResultsSection, 200);
     await getMovieCriterias();
-    await getMoviePredictionResults();
   };
 
   const getMoviePredictionResults = async () => {
-    // TODO: Get movie criteria from API
+    if(!criteria)
+      return;
     setIsPredictionResultLoading(true);
-    // const body = {
-    //   description : movieIdea,
-    //   test : true
-    // }
-    //const result = await axios.post(GET_MOVIE_CRITERIAS, body);
-    setPrediction({
-      rating: 8.2,
-      revenue: '$127.5M',
-    });
-    setTimeout(() => {
-      setIsPredictionResultLoading(false);
-    }, 1500);
+    const result = await axios.post<MoviePrediction>(PREDICT, criteria);
+    setPrediction(result.data)
+    setIsPredictionResultLoading(false);
   };
 
   const getMovieCriterias = async () => {
     // TODO: Get movie criteria from API
     setIsCriteriaLoading(true);
     const body = {
-      description : movieIdea,
-      test : true
+      description : movieIdea
     }
     const result = await axios.post(GET_MOVIE_CRITERIAS, body);
     setCriteria(result.data);
-    setTimeout(() => {
-      setIsCriteriaLoading(false);
-    }, 1000);
+    setIsCriteriaLoading(false);
   };
+
+  useEffect(() => {
+    getMoviePredictionResults()
+  }, [criteria])
+  
 
   return (
     <div className="container mx-auto px-6 py-12">

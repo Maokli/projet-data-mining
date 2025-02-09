@@ -1,6 +1,7 @@
 import React from 'react';
 import { DollarSign, Tag, Film } from 'lucide-react';
 import type {  MoviePredictionCriteria } from '../../types';
+import { formatLargeNumber } from '../../utils/number.utils';
 
 interface MovieCriteriaProps {
   criteria: MoviePredictionCriteria;
@@ -17,7 +18,7 @@ export function MovieCriteria({ criteria }: MovieCriteriaProps) {
           </div>
           <div>
             <h3 className="text-lg font-semibold">Estimated Budget</h3>
-            <p className="text-purple-400 font-bold">{criteria.budget}</p>
+            <p className="text-purple-400 font-bold">{formatLargeNumber(criteria.budget)}</p>
           </div>
         </div>
         
